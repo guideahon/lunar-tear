@@ -12,6 +12,9 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import ctypes
+import time
+import urllib.request
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -44,6 +47,17 @@ LUNAR_BASE_VENV  = LUNAR_BASE_DIR / ".venv" / "Scripts" / "python.exe"
 WEBVIEW_LAUNCHER = Path(__file__).resolve().parent / "webview_launcher.py"
 LUNAR_BASE_PORT  = 8888
 
+
+def _pythonw_executable() -> str:
+    """Prefer pythonw on Windows to avoid transient console windows."""
+    if sys.platform != "win32":
+        return sys.executable
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        return str(exe)
+    pyw = exe.with_name("pythonw.exe")
+    return str(pyw) if pyw.exists() else sys.executable
+
 # ─── Theme ─────────────────────────────────────────────────────────────────────
 BG      = "#14141a"
 BG2     = "#1e1e28"
@@ -67,7 +81,12 @@ MONO    = ("Consolas", 9)
 # ─── Tool Auto-Detection ───────────────────────────────────────────────────────
 def _find_java():
     try:
-        r = subprocess.run(["java", "-version"], capture_output=True, timeout=3)
+        r = subprocess.run(
+            ["java", "-version"],
+            capture_output=True,
+            timeout=3,
+            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
+        )
         if r.returncode == 0:
             return "java"
     except Exception:
@@ -93,7 +112,12 @@ def _find_adb():
     if sdk.exists():
         return str(sdk)
     try:
-        r = subprocess.run(["adb", "version"], capture_output=True, timeout=3)
+        r = subprocess.run(
+            ["adb", "version"],
+            capture_output=True,
+            timeout=3,
+            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
+        )
         if r.returncode == 0:
             return "adb"
     except Exception:
@@ -265,27 +289,46 @@ class LunarBaseProcess:
         self._ready_cb     = ready_cb
         self._stopped_cb   = stopped_cb
 
-    def start(self, port: int = LUNAR_BASE_PORT) -> bool:
+    def start(self, port: int = LUNAR_BASE_PORT, quiet: bool = False) -> bool:
         if self.is_running():
             return False
         if not LUNAR_BASE_DIR.is_dir():
             self._log_cb(f"[lunar-base] ✗ directorio no encontrado: {LUNAR_BASE_DIR}")
             return False
-        python = str(LUNAR_BASE_VENV) if LUNAR_BASE_VENV.exists() else sys.executable
+        if LUNAR_BASE_VENV.exists():
+            pyw = LUNAR_BASE_VENV.with_name("pythonw.exe")
+            python = str(pyw if pyw.exists() else LUNAR_BASE_VENV)
+        else:
+            python = _pythonw_executable()
         cmd = [python, "-m", "uvicorn", "web.app:app",
                "--host", "127.0.0.1", "--port", str(port)]
         try:
+            popen_kwargs = {}
+            if sys.platform == "win32":
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                popen_kwargs["startupinfo"] = si
+                popen_kwargs["creationflags"] = (
+                    subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+                )
+
+            out = subprocess.DEVNULL if quiet else subprocess.PIPE
             self._proc = subprocess.Popen(
                 cmd,
                 cwd=str(LUNAR_BASE_DIR),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                stdout=out,
+                stderr=(subprocess.DEVNULL if quiet else subprocess.STDOUT),
+                text=(not quiet),
+                bufsize=(1 if not quiet else 0),
+                **popen_kwargs,
             )
-            threading.Thread(
-                target=self._reader, args=(self._proc, port), daemon=True
-            ).start()
+            if quiet:
+                threading.Thread(target=self._wait_ready, args=(port,), daemon=True).start()
+            else:
+                threading.Thread(
+                    target=self._reader, args=(self._proc, port), daemon=True
+                ).start()
             return True
         except Exception as e:
             self._log_cb(f"[lunar-base] ✗ {e}")
@@ -295,7 +338,7 @@ class LunarBaseProcess:
         if self._webview_proc and self._webview_proc.poll() is None:
             return
         self._webview_proc = subprocess.Popen(
-            [sys.executable, str(WEBVIEW_LAUNCHER), str(port)],
+            [_pythonw_executable(), str(WEBVIEW_LAUNCHER), str(port)],
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
@@ -325,6 +368,21 @@ class LunarBaseProcess:
         except Exception:
             pass
         self._stopped_cb()
+
+    def _wait_ready(self, port: int):
+        url = f"http://127.0.0.1:{port}/"
+        for _ in range(40):
+            if self._proc is None or self._proc.poll() is not None:
+                self._stopped_cb()
+                return
+            try:
+                urllib.request.urlopen(url, timeout=0.5)
+                self._ready_cb(port)
+                return
+            except Exception:
+                time.sleep(0.25)
+        if self._proc is None or self._proc.poll() is not None:
+            self._stopped_cb()
 
 
 # ─── APK Pipeline ──────────────────────────────────────────────────────────────
@@ -525,6 +583,15 @@ def _update_shortcut(cfg: dict):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        # Hide immediately to avoid any startup flash of the Tk root window.
+        self.withdraw()
+        if sys.platform == "win32":
+            try:
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                    "walter-sparrow.lunar-tear.manager"
+                )
+            except Exception:
+                pass
         self.cfg = load_config()
         self._server_log_buf = LogBuffer()
         self._lb_log_buf     = LogBuffer()
@@ -558,8 +625,7 @@ class App(tk.Tk):
         )
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Hide tkinter window — web dashboard is the primary UI
-        self.withdraw()
+        # Tk window stays hidden — web dashboard is the primary UI
         start_dashboard_server(self, port=DASHBOARD_PORT, lb_port=LUNAR_BASE_PORT)
         self.after(300, self._open_dashboard_webview)
         self.after(800, self._lb_autostart)
@@ -775,7 +841,7 @@ class App(tk.Tk):
         if self._dashboard_webview_proc and self._dashboard_webview_proc.poll() is None:
             return
         self._dashboard_webview_proc = subprocess.Popen(
-            [sys.executable, str(WEBVIEW_LAUNCHER),
+            [_pythonw_executable(), str(WEBVIEW_LAUNCHER),
              f"http://127.0.0.1:{DASHBOARD_PORT}",
              "Lunar Tear — NieR Re[in]carnation Manager"],
             creationflags=subprocess.CREATE_NO_WINDOW,
@@ -1064,14 +1130,15 @@ class App(tk.Tk):
 
     # ── Lunar Base Actions ────────────────────────────────────────────────────
     def _lb_autostart(self):
-        self._lb_start()
+        self._lb_start(autostart=True)
 
-    def _lb_start(self):
+    def _lb_start(self, autostart: bool = False):
         if self._lb.is_running():
             self._lb_open_browser()
             return
-        self._lb_log(f"▶ Iniciando Lunar Base en http://127.0.0.1:{LUNAR_BASE_PORT} ...")
-        if self._lb.start(LUNAR_BASE_PORT):
+        if not autostart:
+            self._lb_log(f"▶ Iniciando Lunar Base en http://127.0.0.1:{LUNAR_BASE_PORT} ...")
+        if self._lb.start(LUNAR_BASE_PORT, quiet=autostart):
             self._btn_lb_start.configure(state="disabled", bg=BG4, fg=FG3)
             self._btn_lb_stop.configure(state="normal", bg=RED, fg="white")
             self._lbl_lb.configure(text="● INICIANDO", fg=YELLOW)

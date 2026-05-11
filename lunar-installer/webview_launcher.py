@@ -2,6 +2,7 @@
 import sys
 import time
 import urllib.request
+import ctypes
 from pathlib import Path
 
 import webview
@@ -20,11 +21,37 @@ for _ in range(40):
 
 ICON = str(Path(__file__).resolve().parent.parent / "lunar-tear.ico")
 
+
+def _set_windows_app_id():
+    """Ensure taskbar uses our app identity/icon instead of pythonw defaults."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "walter-sparrow.lunar-tear.manager"
+        )
+    except Exception:
+        pass
+
+
+_set_windows_app_id()
+
 window = webview.create_window(
     TITLE,
     URL,
     width=1400,
     height=900,
     min_size=(900, 600),
+    hidden=True,
 )
+
+
+def _show_when_ready():
+    try:
+        window.show()
+    except Exception:
+        pass
+
+
+window.events.loaded += _show_when_ready
 webview.start(icon=ICON if Path(ICON).exists() else None)
