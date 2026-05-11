@@ -1,0 +1,13 @@
+{
+  "host": "192.168.1.36",
+  "http_port": 8080,
+  "grpc_port": 8003,
+  "tools": {
+    "java": "java",
+    "adb": "C:\\Users\\cristian\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\\platform-tools\\adb.exe",
+    "zipalign": "C:\\Users\\cristian\\AppData\\Local\\Android\\Sdk\\build-tools\\34.0.0\\zipalign.exe",
+    "apksigner": "C:\\Users\\cristian\\AppData\\Local\\Android\\Sdk\\build-tools\\34.0.0\\apksigner.bat",
+    "keystore": "C:\\Users\\cristian\\.android\\debug.keystore",
+    "python": "C:\\Python312\\pythonw.exe"
+  }
+}
