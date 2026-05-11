@@ -15,6 +15,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+from dashboard_server import DASHBOARD_PORT, LogBuffer, start_dashboard_server
+
 # ─── Paths ─────────────────────────────────────────────────────────────────────
 ROOT            = Path(__file__).resolve().parent.parent
 SERVER_DIR      = ROOT / "server"
@@ -524,18 +526,24 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.cfg = load_config()
+        self._server_log_buf = LogBuffer()
+        self._lb_log_buf     = LogBuffer()
         self._server = ServerProcess(
             log_cb=self._server_log,
             stopped_cb=self._on_server_stopped,
         )
         self._apk_busy = False
         self._poll_tick = 0
+        self._dashboard_webview_proc = None
 
         self.title("Lunar Tear — NieR Re[in]carnation Manager")
         self.geometry("960x700")
         self.minsize(820, 580)
         self.configure(bg=BG)
         self.resizable(True, True)
+        _ico = ROOT / "lunar-tear.ico"
+        if _ico.exists():
+            self.iconbitmap(str(_ico))
 
         self._apply_styles()
         self._build_header()
@@ -549,6 +557,11 @@ class App(tk.Tk):
             stopped_cb=self._on_lb_stopped,
         )
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Hide tkinter window — web dashboard is the primary UI
+        self.withdraw()
+        start_dashboard_server(self, port=DASHBOARD_PORT, lb_port=LUNAR_BASE_PORT)
+        self.after(300, self._open_dashboard_webview)
         self.after(800, self._lb_autostart)
 
     # ── Styles ────────────────────────────────────────────────────────────────
@@ -753,13 +766,28 @@ class App(tk.Tk):
 
     # ── Actions ───────────────────────────────────────────────────────────────
     def _save_config(self):
+        if self._save_config_quiet():
+            messagebox.showinfo("Guardado", "Configuración guardada.\nAcceso directo actualizado.")
+        else:
+            messagebox.showerror("Error", "Los puertos deben ser números enteros.")
+
+    def _open_dashboard_webview(self):
+        if self._dashboard_webview_proc and self._dashboard_webview_proc.poll() is None:
+            return
+        self._dashboard_webview_proc = subprocess.Popen(
+            [sys.executable, str(WEBVIEW_LAUNCHER),
+             f"http://127.0.0.1:{DASHBOARD_PORT}",
+             "Lunar Tear — NieR Re[in]carnation Manager"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+    def _save_config_quiet(self) -> bool:
         host = self._v_host.get().strip()
         try:
             http_port = int(self._v_http.get())
             grpc_port = int(self._v_grpc.get())
         except ValueError:
-            messagebox.showerror("Error", "Los puertos deben ser números enteros.")
-            return
+            return False
         self.cfg.update(host=host, http_port=http_port, grpc_port=grpc_port)
         tools = self.cfg.setdefault("tools", {})
         if hasattr(self, "_tool_vars"):
@@ -767,7 +795,10 @@ class App(tk.Tk):
                 tools[k] = var.get().strip()
         save_config(self.cfg)
         _update_shortcut(self.cfg)
-        messagebox.showinfo("Guardado", "Configuración guardada.\nAcceso directo actualizado.")
+        return True
+
+    def _migrate_db_quiet(self):
+        self._migrate_db(silent=True)
 
     def _auto_detect(self):
         detected = auto_detect_tools()
@@ -799,7 +830,7 @@ class App(tk.Tk):
         else:
             self._server_log("✗ No se pudo iniciar el server.")
 
-    def _migrate_db(self):
+    def _migrate_db(self, silent: bool = False):
         """Apply pending SQLite migrations without needing goose."""
         import sqlite3 as _sql
         db_path = SERVER_DIR / "db" / "game.db"
@@ -881,9 +912,15 @@ class App(tk.Tk):
             con.commit()
             con.close()
             msg = ("Migraciones aplicadas:\n• " + "\n• ".join(applied)) if applied else "BD ya actualizada. Sin cambios."
-            messagebox.showinfo("Migrate DB", msg)
+            if silent:
+                self._server_log(f"[migrate] {msg}")
+            else:
+                messagebox.showinfo("Migrate DB", msg)
         except Exception as e:
-            messagebox.showerror("Migrate DB Error", str(e))
+            if silent:
+                self._server_log(f"[migrate] ERROR: {e}")
+            else:
+                messagebox.showerror("Migrate DB Error", str(e))
 
     def _stop_server(self):
         self._server.stop()
@@ -904,6 +941,7 @@ class App(tk.Tk):
         self.after(0, lambda: self._server_log("■ Server detenido."))
 
     def _server_log(self, msg: str):
+        self._server_log_buf.append(msg)
         def _do():
             self._srv_log.configure(state="normal")
             self._srv_log.insert("end", msg + "\n")
@@ -1055,7 +1093,6 @@ class App(tk.Tk):
         def _do():
             self._lbl_lb.configure(text="● RUNNING", fg=GREEN)
             self._btn_lb_browser.configure(state="normal")
-            self._lb.open_webview(port)
         self.after(0, _do)
 
     def _on_lb_stopped(self):
@@ -1068,6 +1105,7 @@ class App(tk.Tk):
         self.after(0, _do)
 
     def _lb_log(self, msg: str):
+        self._lb_log_buf.append(msg)
         def _do():
             self._lb_log_box.configure(state="normal")
             self._lb_log_box.insert("end", msg + "\n")
@@ -1082,12 +1120,20 @@ class App(tk.Tk):
 
     # ── Window close ─────────────────────────────────────────────────────────
     def _on_close(self):
+        if self._dashboard_webview_proc and self._dashboard_webview_proc.poll() is None:
+            self._dashboard_webview_proc.terminate()
         self._lb.stop()
         self._server.stop()
         self.destroy()
 
     # ── Status polling ────────────────────────────────────────────────────────
     def _poll(self):
+        # Quit when dashboard webview window is closed
+        if (self._dashboard_webview_proc is not None
+                and self._dashboard_webview_proc.poll() is not None):
+            self._on_close()
+            return
+
         # Server state
         if not self._server.is_running():
             if self._lbl_server.cget("text") == "● RUNNING":
