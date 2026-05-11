@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Lunar Tear — NieR Re[in]carnation Manager</title>
+<style>
+:root {
+  --bg-cream:      #cfc7b0;
+  --bg-cream-dark: #b8b099;
+  --fg-dark:       #2c2922;
+  --fg-mid:        #57523f;
+  --accent:        #1a1814;
+  --panel:         #d8d1bb;
+  --panel-inv-bg:  #2c2922;
+  --panel-inv-fg:  #d8d1bb;
+  --danger:        #6b0a0a;
+  --success:       #3a4d24;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; overflow: hidden;
+  background: var(--bg-cream); color: var(--fg-dark);
+  font-family: "Segoe UI", "Tahoma", "Verdana", sans-serif;
+  font-size: 14px; line-height: 1.45;
+}
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgba(0,0,0,.03) 3px, rgba(0,0,0,.03) 4px),
+    repeating-linear-gradient(to right,  transparent 0, transparent 3px, rgba(0,0,0,.03) 3px, rgba(0,0,0,.03) 4px);
+  z-index: 9999;
+}
+body { display: flex; flex-direction: column; }
+
+.terminal-bar {
+  background: var(--accent); color: var(--bg-cream);
+  padding: 8px 24px; font-size: 11px; letter-spacing: .2em;
+  text-transform: uppercase; display: flex; align-items: center;
+  justify-content: space-between; flex-shrink: 0;
+}
+.terminal-bar .left { display: flex; gap: 24px; }
+.terminal-bar .right { display: flex; gap: 14px; align-items: center; }
+
+.badge {
+  font-size: 10px; font-weight: 700; letter-spacing: .1em;
+  padding: 2px 8px; text-transform: uppercase;
+}
+.badge.running  { background: var(--success); color: #a0d888; }
+.badge.stopped  { background: var(--danger);  color: #d89090; }
+.badge.starting { background: #4a3a08; color: #d8b848; }
+.badge.ok       { background: var(--success); color: #a0d888; }
+.badge.missing  { background: var(--danger); color: #d89090; }
+
+nav.primary {
+  display: flex; background: var(--accent);
+  border-bottom: 4px double var(--accent);
+  flex-shrink: 0; overflow-x: auto;
+}
+nav.primary button {
+  color: var(--bg-cream); padding: 12px 22px;
+  font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+  font-weight: 600; font-family: inherit; background: transparent;
+  border: none; outline: none; cursor: pointer; white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+nav.primary button:hover { background: var(--bg-cream); color: var(--accent); }
+nav.primary button.active { background: var(--bg-cream); color: var(--accent); }
+
+.content { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+.panel { flex: 1; overflow-y: auto; padding: 32px 40px; display: flex; flex-direction: column; gap: 24px; }
+
+.sh {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .18em;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.sh::before { content: '[  '; color: var(--fg-mid); font-weight: 400; }
+.sh::after  { content: '  ]'; color: var(--fg-mid); font-weight: 400; }
+.sh-line { flex: 1; height: 1px; background: var(--accent); opacity: .18; }
+
+.pbox { border: 2px solid var(--accent); background: var(--panel); padding: 16px 20px; }
+.frow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.flbl { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--fg-mid); white-space: nowrap; }
+.finput {
+  background: var(--bg-cream); border: 1px solid var(--fg-mid);
+  color: var(--fg-dark); font-family: inherit; font-size: 13px;
+  padding: 5px 9px; outline: none;
+}
+.finput:focus { border-color: var(--accent); }
+
+.btn {
+  border: 2px solid var(--accent); cursor: pointer;
+  font-family: inherit; font-size: 11px; font-weight: 700;
+  padding: 7px 20px; text-transform: uppercase; letter-spacing: .1em;
+  background: var(--panel-inv-bg); color: var(--panel-inv-fg);
+  transition: opacity .12s;
+}
+.btn:hover:not(:disabled) { opacity: .82; }
+.btn:disabled { opacity: .3; cursor: default; }
+.btn-ghost { background: transparent; color: var(--fg-dark); border: 2px solid var(--fg-mid); }
+.btn-ghost:hover:not(:disabled) { background: var(--bg-cream-dark); border-color: var(--accent); }
+.btn-sm { padding: 4px 12px; font-size: 10px; }
+.crow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.log-wrap { display: flex; flex-direction: column; }
+.log-box {
+  overflow-y: auto; background: var(--panel-inv-bg); color: #a0c890;
+  font-family: Consolas, monospace; font-size: 12px;
+  padding: 10px 14px; border: 2px solid var(--accent);
+  height: 220px;
+}
+.log-box.lb-color { color: #80b8c8; }
+.log-box div { line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
+
+#lb-frame { flex: 1; border: none; width: 100%; display: none; }
+#lb-offline { flex: 1; display: none; align-items: center; justify-content: center; }
+#lb-offline.show { display: flex; }
+
+.subtabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.subtabs button.active { background: var(--bg-cream); color: var(--accent); }
+.subpanel { display: none; }
+.subpanel.active { display: block; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.kv { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid var(--fg-mid); padding: 8px; }
+
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-cream-dark); }
+::-webkit-scrollbar-thumb { background: var(--fg-mid); }
+</style>
+</head>
+<body>
+
+<div class="terminal-bar">
+  <div class="left">
+    <span>YoRHa</span>
+    <span>Bunker Terminal</span>
+    <span>Lunar Tear</span>
+  </div>
+  <div class="right">
+    <span id="lb-badge"  class="badge stopped">LB: Offline</span>
+    <span id="srv-badge" class="badge stopped">Server: Stopped</span>
+  </div>
+</div>
+
+<nav class="primary" id="primary-nav"></nav>
+
+<div class="content">
+  <div id="panel-server" class="panel">
+    <div>
+      <div class="sh">Configuration<div class="sh-line"></div></div>
+      <div class="pbox">
+        <div class="frow">
+          <span class="flbl">IP Host</span>
+          <input id="cfg-host" class="finput" style="width:140px" value="192.168.1.36">
+          <span class="flbl">HTTP Port</span>
+          <input id="cfg-http" class="finput" style="width:72px" value="8080">
+          <span class="flbl">gRPC Port</span>
+          <input id="cfg-grpc" class="finput" style="width:72px" value="8003">
+          <button class="btn btn-ghost btn-sm" onclick="saveConfig()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="sh">Server Controls<div class="sh-line"></div></div>
+      <div class="pbox">
+        <div class="crow">
+          <button id="btn-srv-start" class="btn" onclick="api('/api/server/start')">▶ Start Server</button>
+          <button class="btn btn-ghost" onclick="api('/api/server/migrate')">⚙ Migrate DB</button>
+          <button id="btn-srv-stop" class="btn btn-ghost" disabled onclick="api('/api/server/stop')">■ Stop</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearLog('server')">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-wrap">
+      <div class="sh">Server Output<div class="sh-line"></div></div>
+      <div id="log-server" class="log-box"></div>
+    </div>
+
+    <div>
+      <div class="sh">Lunar Base<div class="sh-line"></div></div>
+      <div class="pbox">
+        <div class="crow">
+          <button id="btn-lb-start" class="btn" onclick="api('/api/lb/start')">▶ Iniciar Lunar Base</button>
+          <button id="btn-lb-stop" class="btn btn-ghost" disabled onclick="api('/api/lb/stop')">■ Detener</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearLog('lb')">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-wrap">
+      <div class="sh">Lunar Base Output<div class="sh-line"></div></div>
+      <div id="log-lb" class="log-box lb-color"></div>
+    </div>
+
+    <footer style="margin-top:40px;margin-left:-40px;margin-right:-40px;padding:24px 40px;text-align:center;font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--fg-mid);border-top:4px double var(--accent)">End of transmission // Glory to mankind</footer>
+  </div>
+
+  <div id="panel-installer" class="panel" style="display:none">
+    <div class="subtabs" id="installer-tabs">
+      <button class="btn active" data-installer-tab="setup" onclick="goInstallerTab('setup')">Setup</button>
+      <button class="btn btn-ghost" data-installer-tab="apk" onclick="goInstallerTab('apk')">APK</button>
+      <button class="btn btn-ghost" data-installer-tab="tools" onclick="goInstallerTab('tools')">Tools</button>
+    </div>
+
+    <div id="installer-setup" class="subpanel active">
+      <div class="sh">Setup Status<div class="sh-line"></div></div>
+      <div class="pbox status-grid">
+        <div class="kv"><span>apktool.jar</span><span id="st-apktool" class="badge missing">Missing</span></div>
+        <div class="kv"><span>platform-tools</span><span id="st-pt" class="badge missing">Missing</span></div>
+        <div class="kv"><span>keystore</span><span id="st-ks" class="badge missing">Missing</span></div>
+        <div class="kv"><span>server</span><span id="st-server" class="badge missing">Missing</span></div>
+        <div class="kv"><span>3.7.1.apk</span><span id="st-apk" class="badge missing">Missing</span></div>
+        <div class="kv"><span>patched_signed.apk</span><span id="st-signed" class="badge missing">Missing</span></div>
+      </div>
+
+      <div class="sh" style="margin-top:16px">Downloads<div class="sh-line"></div></div>
+      <div class="pbox">
+        <div class="crow">
+          <button class="btn" onclick="api('/api/installer/dl/apktool')">Download apktool</button>
+          <button class="btn" onclick="api('/api/installer/dl/platform-tools')">Download platform-tools</button>
+          <button class="btn" onclick="api('/api/installer/dl/keystore')">Generate keystore</button>
+          <button class="btn" onclick="api('/api/installer/dl/server')">Download server</button>
+          <button class="btn" onclick="api('/api/installer/dl/apk')">Download APK</button>
+        </div>
+        <div class="frow" style="margin-top:10px">
+          <span class="flbl">Progress</span>
+          <input id="setup-progress" class="finput" style="flex:1;min-width:240px" readonly value="Idle">
+        </div>
+      </div>
+
+      <div class="log-wrap" style="margin-top:16px">
+        <div class="sh">Setup Log<div class="sh-line"></div></div>
+        <div id="log-setup" class="log-box"></div>
+      </div>
+    </div>
+
+    <div id="installer-apk" class="subpanel">
+      <div class="sh">APK Actions<div class="sh-line"></div></div>
+      <div class="pbox">
+        <div class="crow">
+          <button class="btn" onclick="api('/api/apk/run-all')">Re-Patch + Build + Install</button>
+          <button class="btn btn-ghost" onclick="api('/api/apk/patch-meta')">Patch Metadata + Build</button>
+          <button class="btn btn-ghost" onclick="api('/api/apk/install-only')">Install Signed APK</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearLog('apk')">Clear</button>
+        </div>
+      </div>
+
+      <div class="log-wrap" style="margin-top:16px">
+        <div class="sh">APK Pipeline Log<div class="sh-line"></div></div>
+        <div id="log-apk" class="log-box"></div>
+      </div>
+    </div>
+
+    <div id="installer-tools" class="subpanel">
+      <div class="sh">Tools Paths<div class="sh-line"></div></div>
+      <div class="pbox">
+        <div class="frow"><span class="flbl" style="min-width:110px">Java</span><input id="tool-java" class="finput" style="flex:1;min-width:360px"></div>
+        <div class="frow" style="margin-top:8px"><span class="flbl" style="min-width:110px">ADB</span><input id="tool-adb" class="finput" style="flex:1;min-width:360px"></div>
+        <div class="frow" style="margin-top:8px"><span class="flbl" style="min-width:110px">zipalign</span><input id="tool-zipalign" class="finput" style="flex:1;min-width:360px"></div>
+        <div class="frow" style="margin-top:8px"><span class="flbl" style="min-width:110px">apksigner</span><input id="tool-apksigner" class="finput" style="flex:1;min-width:360px"></div>
+        <div class="frow" style="margin-top:8px"><span class="flbl" style="min-width:110px">keystore</span><input id="tool-keystore" class="finput" style="flex:1;min-width:360px"></div>
+        <div class="frow" style="margin-top:12px">
+          <button class="btn" onclick="saveTools()">Save Tools</button>
+          <button class="btn btn-ghost" onclick="api('/api/tools/auto-detect')">Auto Detect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <iframe id="lb-frame" src=""></iframe>
+
+  <div id="lb-offline">
+    <div class="pbox" style="text-align:center;max-width:480px">
+      <p style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--fg-mid);margin-bottom:10px">[ Lunar Base Offline ]</p>
+      <p style="margin-bottom:16px">Iniciá Lunar Base desde la pestaña Server primero.</p>
+      <button class="btn" onclick="goServer()">← Volver a Server</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let srvIdx = 0, lbIdx = 0, apkIdx = 0, setupIdx = 0;
+let cfgLoaded = false;
+let toolsLoaded = false;
+let lbRunning = false;
+let activeTab = 'server';
+let activeLBPath = '/';
+let serverInstalled = false;
+const LB = 8888;
+
+const lbTabs = [
+  { label: 'Status', path: '/' },
+  { label: 'Users', path: '/users' },
+  { label: 'Save Data', path: '/backups' },
+  { label: 'Item Editor', path: '/items' },
+  { label: 'Costume Editor', path: '/costumes' },
+  { label: 'Weapon Editor', path: '/weapons' },
+  { label: 'Upgrade Manager', path: '/upgrades' },
+  { label: 'Memoir Editor', path: '/memoirs' },
+];
+
+function primaryTabSpec() {
+  const base = [{ key: 'server', label: 'Server' }];
+  lbTabs.forEach((t, i) => base.push({ key: `lb-${i}`, label: t.label, lb: t }));
+  const installer = { key: 'installer', label: 'Installer' };
+  return serverInstalled ? [...base, installer] : [installer, ...base];
+}
+
+function renderPrimaryTabs() {
+  const nav = document.getElementById('primary-nav');
+  const current = activeTab;
+  nav.innerHTML = '';
+  const spec = primaryTabSpec();
+  for (const t of spec) {
+    const b = document.createElement('button');
+    b.textContent = t.label;
+    b.dataset.tab = t.key;
+    b.onclick = () => {
+      if (t.key === 'server') goServer();
+      else if (t.key === 'installer') goInstaller();
+      else goLB(t.lb.path);
+    };
+    nav.appendChild(b);
+  }
+  setNav(current);
+}
+
+function setNav(tabKey) {
+  document.querySelectorAll('#primary-nav button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === tabKey);
+  });
+}
+
+function goServer() {
+  activeTab = 'server';
+  setNav('server');
+  document.getElementById('panel-server').style.display = '';
+  document.getElementById('panel-installer').style.display = 'none';
+  document.getElementById('lb-frame').style.display = 'none';
+  document.getElementById('lb-offline').className = '';
+}
+
+function goInstaller() {
+  activeTab = 'installer';
+  setNav('installer');
+  document.getElementById('panel-server').style.display = 'none';
+  document.getElementById('panel-installer').style.display = '';
+  document.getElementById('lb-frame').style.display = 'none';
+  document.getElementById('lb-offline').className = '';
+}
+
+function goInstallerTab(tab) {
+  document.querySelectorAll('[data-installer-tab]').forEach((b) => {
+    const on = b.dataset.installerTab === tab;
+    b.className = on ? 'btn active' : 'btn btn-ghost';
+  });
+  document.querySelectorAll('.subpanel').forEach((p) => p.classList.remove('active'));
+  document.getElementById(`installer-${tab}`).classList.add('active');
+}
+
+function goLB(path) {
+  activeTab = lbTabs.findIndex((t) => t.path === path) >= 0 ? `lb-${lbTabs.findIndex((t) => t.path === path)}` : 'lb-0';
+  activeLBPath = path;
+  setNav(activeTab);
+  document.getElementById('panel-server').style.display = 'none';
+  document.getElementById('panel-installer').style.display = 'none';
+
+  if (lbRunning) {
+    const f = document.getElementById('lb-frame');
+    f.src = `http://127.0.0.1:${LB}${path}`;
+    f.style.display = 'block';
+    document.getElementById('lb-offline').className = '';
+  } else {
+    document.getElementById('lb-frame').style.display = 'none';
+    document.getElementById('lb-offline').className = 'show';
+  }
+}
+
+async function api(url, body = {}) {
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (_) {}
+}
+
+async function saveConfig() {
+  const body = {
+    host: document.getElementById('cfg-host').value.trim(),
+    http_port: parseInt(document.getElementById('cfg-http').value) || 8080,
+    grpc_port: parseInt(document.getElementById('cfg-grpc').value) || 8003,
+  };
+  await api('/api/config', body);
+}
+
+async function saveTools() {
+  const body = {
+    java: document.getElementById('tool-java').value.trim(),
+    adb: document.getElementById('tool-adb').value.trim(),
+    zipalign: document.getElementById('tool-zipalign').value.trim(),
+    apksigner: document.getElementById('tool-apksigner').value.trim(),
+    keystore: document.getElementById('tool-keystore').value.trim(),
+  };
+  await api('/api/tools/save', body);
+}
+
+function setBoolBadge(id, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = ok ? 'OK' : 'Missing';
+  el.className = `badge ${ok ? 'ok' : 'missing'}`;
+}
+
+async function pollInstaller() {
+  try {
+    const st = await fetch('/api/installer/status').then((r) => r.json());
+    setBoolBadge('st-apktool', !!st.apktool);
+    setBoolBadge('st-pt', !!st.platform_tools);
+    setBoolBadge('st-ks', !!st.keystore);
+    setBoolBadge('st-server', !!st.server);
+    setBoolBadge('st-apk', !!st.apk);
+    setBoolBadge('st-signed', !!st.signed_apk);
+  } catch (_) {}
+
+  try {
+    const p = await fetch('/api/installer/progress').then((r) => r.json());
+    const text = p.active ? `${p.label || 'Descargando...'} (${p.pct || 0}%)` : 'Idle';
+    document.getElementById('setup-progress').value = text;
+  } catch (_) {}
+
+  try {
+    const t = await fetch('/api/tools').then((r) => r.json());
+    if (!toolsLoaded || activeTab === 'installer') {
+      document.getElementById('tool-java').value = t.java || '';
+      document.getElementById('tool-adb').value = t.adb || '';
+      document.getElementById('tool-zipalign').value = t.zipalign || '';
+      document.getElementById('tool-apksigner').value = t.apksigner || '';
+      document.getElementById('tool-keystore').value = t.keystore || '';
+      toolsLoaded = true;
+    }
+  } catch (_) {}
+}
+
+async function pollStatus() {
+  try {
+    const d = await fetch('/api/status').then(r => r.json());
+
+    if (serverInstalled !== !!d.server_installed) {
+      serverInstalled = !!d.server_installed;
+      renderPrimaryTabs();
+    }
+
+    const srvBadge = document.getElementById('srv-badge');
+    const bSS = document.getElementById('btn-srv-start');
+    const bST = document.getElementById('btn-srv-stop');
+    if (d.server_running) {
+      srvBadge.textContent = 'Server: Running'; srvBadge.className = 'badge running';
+      bSS.disabled = true;
+      bST.disabled = false; bST.className = 'btn';
+    } else {
+      srvBadge.textContent = 'Server: Stopped'; srvBadge.className = 'badge stopped';
+      bSS.disabled = false;
+      bST.disabled = true;  bST.className = 'btn btn-ghost';
+    }
+
+    const lbBadge = document.getElementById('lb-badge');
+    const bLS = document.getElementById('btn-lb-start');
+    const bLT = document.getElementById('btn-lb-stop');
+    const wasRunning = lbRunning;
+    lbRunning = d.lb_running;
+
+    if (lbRunning) {
+      lbBadge.textContent = 'LB: Running'; lbBadge.className = 'badge running';
+      bLS.disabled = true;  bLS.className = 'btn btn-ghost';
+      bLT.disabled = false; bLT.className = 'btn';
+      if (!wasRunning && activeTab.startsWith('lb-')) {
+        const f = document.getElementById('lb-frame');
+        f.src = `http://127.0.0.1:${LB}${activeLBPath}`;
+        f.style.display = 'block';
+        document.getElementById('lb-offline').className = '';
+      }
+    } else {
+      lbBadge.textContent = 'LB: Offline'; lbBadge.className = 'badge stopped';
+      bLS.disabled = false; bLS.className = 'btn';
+      bLT.disabled = true;  bLT.className = 'btn btn-ghost';
+      if (wasRunning && activeTab.startsWith('lb-')) {
+        const f = document.getElementById('lb-frame');
+        f.style.display = 'none';
+        f.src = '';
+        document.getElementById('lb-offline').className = 'show';
+      }
+    }
+
+    if (!cfgLoaded) {
+      document.getElementById('cfg-host').value = d.host;
+      document.getElementById('cfg-http').value = d.http_port;
+      document.getElementById('cfg-grpc').value = d.grpc_port;
+      cfgLoaded = true;
+    }
+  } catch (_) {}
+}
+
+async function pollLogs(type) {
+  const idxMap = { server: srvIdx, lb: lbIdx, apk: apkIdx, setup: setupIdx };
+  const idx = idxMap[type] || 0;
+  try {
+    const d = await fetch(`/api/logs/${type}?since=${idx}`).then(r => r.json());
+    if (d.lines && d.lines.length) {
+      const box = document.getElementById(`log-${type}`);
+      if (box) {
+        const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+        for (const line of d.lines) {
+          const el = document.createElement('div');
+          el.textContent = line;
+          box.appendChild(el);
+        }
+        if (atBottom) box.scrollTop = box.scrollHeight;
+      }
+    }
+    if (type === 'server') srvIdx = d.total;
+    else if (type === 'lb') lbIdx = d.total;
+    else if (type === 'apk') apkIdx = d.total;
+    else if (type === 'setup') setupIdx = d.total;
+  } catch (_) {}
+}
+
+async function clearLog(type) {
+  const el = document.getElementById(`log-${type}`);
+  if (el) el.innerHTML = '';
+  try {
+    const d = await fetch(`/api/logs/${type}?since=0`).then(r => r.json());
+    if (type === 'server') srvIdx = d.total;
+    else if (type === 'lb') lbIdx = d.total;
+    else if (type === 'apk') apkIdx = d.total;
+    else if (type === 'setup') setupIdx = d.total;
+  } catch (_) {}
+}
+
+async function bootstrap() {
+  try {
+    const d = await fetch('/api/status').then((r) => r.json());
+    serverInstalled = !!d.server_installed;
+  } catch (_) {
+    serverInstalled = false;
+  }
+  renderPrimaryTabs();
+  if (serverInstalled) goServer(); else goInstaller();
+  pollStatus();
+  pollInstaller();
+  setInterval(pollStatus, 1500);
+  setInterval(pollInstaller, 1500);
+  setInterval(() => pollLogs('server'), 900);
+  setInterval(() => pollLogs('lb'), 900);
+  setInterval(() => pollLogs('apk'), 900);
+  setInterval(() => pollLogs('setup'), 900);
+}
+
+bootstrap();
+</script>
+</body>
+</html>
+

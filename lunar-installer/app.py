@@ -20,6 +20,13 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from dashboard_server import DASHBOARD_PORT, LogBuffer, start_dashboard_server
 
+
+def _runtime_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 # ─── Paths ─────────────────────────────────────────────────────────────────────
 ROOT            = Path(__file__).resolve().parent.parent
 SERVER_DIR      = ROOT / "server"
@@ -37,7 +44,7 @@ METADATA_BACKUP = PATCHED_DIR / "assets/bin/Data/Managed/Metadata/global-metadat
 UNSIGNED_APK    = CLIENT_DIR / "patched_unsigned.apk"
 ALIGNED_APK     = CLIENT_DIR / "patched_aligned.apk"
 SIGNED_APK      = CLIENT_DIR / "patched_signed.apk"
-CONFIG_PATH     = Path(__file__).resolve().parent / "config.json"
+CONFIG_PATH     = _runtime_dir() / "config.json"
 DEBUG_KEYSTORE  = Path.home() / ".android" / "debug.keystore"
 SHORTCUT_PATH   = Path.home() / "Desktop" / "NieR Lunar Tear Server.lnk"
 
@@ -57,6 +64,29 @@ def _pythonw_executable() -> str:
         return str(exe)
     pyw = exe.with_name("pythonw.exe")
     return str(pyw) if pyw.exists() else sys.executable
+
+
+def _run_embedded_webview(url: str, title: str):
+    import webview
+
+    icon = str(ROOT / "lunar-tear.ico")
+    window = webview.create_window(
+        title,
+        url,
+        width=1400,
+        height=900,
+        min_size=(900, 600),
+        hidden=True,
+    )
+
+    def _show_when_ready():
+        try:
+            window.show()
+        except Exception:
+            pass
+
+    window.events.loaded += _show_when_ready
+    webview.start(icon=icon if Path(icon).exists() else None)
 
 # ─── Theme ─────────────────────────────────────────────────────────────────────
 BG      = "#14141a"
@@ -337,10 +367,18 @@ class LunarBaseProcess:
     def open_webview(self, port: int = LUNAR_BASE_PORT):
         if self._webview_proc and self._webview_proc.poll() is None:
             return
-        self._webview_proc = subprocess.Popen(
-            [_pythonw_executable(), str(WEBVIEW_LAUNCHER), str(port)],
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        url = f"http://127.0.0.1:{port}"
+        title = "Lunar Base — NieR Re[in]carnation DB Manager"
+        if getattr(sys, "frozen", False):
+            self._webview_proc = subprocess.Popen(
+                [sys.executable, "--webview-launcher", url, title],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            self._webview_proc = subprocess.Popen(
+                [_pythonw_executable(), str(WEBVIEW_LAUNCHER), str(port)],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
 
     def stop(self):
         if self._webview_proc and self._webview_proc.poll() is None:
@@ -840,12 +878,18 @@ class App(tk.Tk):
     def _open_dashboard_webview(self):
         if self._dashboard_webview_proc and self._dashboard_webview_proc.poll() is None:
             return
-        self._dashboard_webview_proc = subprocess.Popen(
-            [_pythonw_executable(), str(WEBVIEW_LAUNCHER),
-             f"http://127.0.0.1:{DASHBOARD_PORT}",
-             "Lunar Tear — NieR Re[in]carnation Manager"],
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        url = f"http://127.0.0.1:{DASHBOARD_PORT}"
+        title = "Lunar Tear — NieR Re[in]carnation Manager"
+        if getattr(sys, "frozen", False):
+            self._dashboard_webview_proc = subprocess.Popen(
+                [sys.executable, "--webview-launcher", url, title],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            self._dashboard_webview_proc = subprocess.Popen(
+                [_pythonw_executable(), str(WEBVIEW_LAUNCHER), url, title],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
 
     def _save_config_quiet(self) -> bool:
         host = self._v_host.get().strip()
@@ -1251,5 +1295,11 @@ def _log_box(parent, fg="#b0b8a0") -> scrolledtext.ScrolledText:
 
 # ─── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "--webview-launcher":
+        arg1 = sys.argv[2] if len(sys.argv) > 2 else f"http://127.0.0.1:{DASHBOARD_PORT}"
+        title = sys.argv[3] if len(sys.argv) > 3 else "Lunar Tear — NieR Re[in]carnation Manager"
+        url = arg1 if arg1.startswith("http") else f"http://127.0.0.1:{arg1}"
+        _run_embedded_webview(url, title)
+        sys.exit(0)
     app = App()
     app.mainloop()

@@ -6,12 +6,21 @@ import sys
 import threading
 import urllib.request
 import zipfile
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 DASHBOARD_PORT = 8887
-_HTML = Path(__file__).resolve().parent / "dashboard.html"
+
+
+def _runtime_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+_HTML = _runtime_dir() / "dashboard.html"
 
 # ── Paths (mirror app.py) ──────────────────────────────────────────────────────
 _ROOT         = Path(__file__).resolve().parent.parent
@@ -28,7 +37,7 @@ _PATCHED_DIR  = _CLIENT_DIR / "patched"
 _SIGNED_APK   = _CLIENT_DIR / "patched_signed.apk"
 _METADATA_BAK = _PATCHED_DIR / "assets/bin/Data/Managed/Metadata/global-metadata.dat.orig"
 _DEBUG_KS     = Path.home() / ".android" / "debug.keystore"
-_CONFIG_PATH  = Path(__file__).resolve().parent / "config.json"
+_CONFIG_PATH  = _runtime_dir() / "config.json"
 
 # ── Download URLs ──────────────────────────────────────────────────────────────
 _APKTOOL_URL = "https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar"
